@@ -2,9 +2,12 @@ use std::{
     io::{
         BufRead, BufReader, Write
     }, 
-    net::TcpStream
+    net::TcpStream,
+    collections::HashMap
 };
 use std::net::TcpListener;
+use once_cell::sync::Lazy;
+use std::sync::Mutex;
 
 #[allow(unused_imports)]
 use anyhow::Error;
@@ -16,7 +19,18 @@ struct Request {
     headers: Vec<String>
 }
 
-fn handle_message(mut stream: TcpStream) {
+fn echo_request(stream: &TcpStream) {
+
+}
+
+static ROUTES: Lazy<Mutex<HashMap<&'static str, Box<dyn Fn(&TcpStream) + Send + Sync>>>> = Lazy::new(|| {
+    #[warn(unused_mut)]
+    let mut routes: HashMap<&'static str, Box<dyn Fn(&TcpStream) + Send + Sync>> = HashMap::new();
+
+    Mutex::new(routes)
+});
+
+fn handle_request(mut stream: TcpStream) {
     let request = read_stream(&stream);
     println!("Request data\nmethod: {}\nroute: {}\nheaders: {:?}", request.method, request.route, request.headers);
 
@@ -86,7 +100,7 @@ fn main() {
         match stream {
             Ok(_stream) => {
                 println!("accepted new connection");
-                handle_message(_stream);
+                handle_request(_stream);
             }
             Err(e) => {
                 println!("error: {}", e);
