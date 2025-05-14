@@ -109,17 +109,16 @@ fn handle_request(stream: TcpStream) {
 
 //Functions for routes destinations
 fn echo(request: &Request) -> String {
-    let split_route = request.route
-        .split("/")
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .collect::<Vec<String>>();
+    let reg = regex::Regex::new(r"^/echo/(?P<message>[^/]+)$").unwrap();
+    
+    if let Some(caps) = reg.captures(&request.route) {
+        let message = &caps["message"];
 
-    println!("Message in request: {:?}", split_route);
-
-    let message: &String = &split_route[1];
-
-    String::from(format!("200 Ok\r\nContent-Type:text/plain\r\nContent-Length: {}\r\n\r\n{}", message.len(), message))
+        String::from(format!("200 Ok\r\nContent-Type:text/plain\r\nContent-Length: {}\r\n\r\n{}", message.len(), message))
+    } else {
+        let message: String = String::from("Invalid Message");
+        String::from(format!("400 Bad Request\r\nContent-Type:text/plain\r\nContent-Length: {}\r\n\r\n{}", message.len(), message))
+    }
 }
 
 fn main() {
