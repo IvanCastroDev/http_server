@@ -14,7 +14,43 @@ use std::sync::Mutex;
 use anyhow::Error;
 
 // Structs and types
-type RouteFunction = Box<dyn Fn(&Request) -> String + Send + Sync>;
+type FnRoute = fn(&Request) -> String;
+
+enum Method {
+    GET,
+    POST,
+    PUT,
+    DELETE,
+    PATCH
+}
+
+#[derive(Default)]
+struct RouterNode {
+    child: HashMap<&'static str, RouterNode>,
+    din_child: Option<Box<RouterNode>>,
+    handler: Option<FnRoute>
+}
+
+#[derive(Default)]
+struct Router {
+    routes: HashMap<Method, HashMap<&'static str, RouterNode>>
+}
+
+impl Router {
+    fn new() -> Self {
+        Router {
+            routes: HashMap::default()
+        }
+    }
+
+    fn post(route: &str, handler: FnRoute) {
+        Self::add_route(Method::POST, route, handler);
+    }
+
+    fn add_route(method: Method, route: &str, handler: FnRoute) {
+        
+    }
+}
 
 #[derive(Debug)]
 struct Request {
@@ -72,22 +108,19 @@ impl Request  {
     }
 }
 
-static ROUTES: Lazy<Mutex<HashMap<&'static str, RouteFunction>>> = Lazy::new(|| {
-    #[allow(unused_mut)]
-    let mut routes: HashMap<&'static str, RouteFunction> = HashMap::new();
-
-    Mutex::new(routes)
-});
-
 // Utilities
-fn register_route(route: &'static str, f: RouteFunction) {
-    let mut routes = ROUTES.lock().unwrap();
+fn parse_method(method: &str) -> Method {
+    match method.to_uppercase().as_str() {
+        "GET" => Method::GET,
+        "POST" => Method::POST,
+        "PUT" => Method::PUT,
+        "DELETE" => Method::DELETE,
+        "PATCH" => Method::PATCH,
+        _ => panic!("Unsupported HTTP method"),
+    }
+} 
 
-    routes.insert(route, f);
-}
-
-fn exec_route_function(name: &str, request: &mut Request) {
-    let routes = ROUTES.lock().unwrap();
+/* fn exec_route_function(name: &str, request: &mut Request) {
 
     let mut response = String::from("HTTP/1.1 ");
 
@@ -99,7 +132,7 @@ fn exec_route_function(name: &str, request: &mut Request) {
     };
 
     request.stream.write(response.as_bytes()).unwrap();
-}
+} */
 
 fn handle_request(stream: TcpStream) {
     let mut request = Request::new(stream);
@@ -124,8 +157,6 @@ fn echo(request: &Request) -> String {
 fn main() {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     println!("Logs from your program will appear here!");
-
-    register_route("/echo", Box::new(echo));
 
     let listener = TcpListener::bind("127.0.0.1:4221").unwrap();
 
