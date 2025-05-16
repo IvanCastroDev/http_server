@@ -7,8 +7,6 @@ use std::{
     collections::HashMap
 };
 use std::net::TcpListener;
-use once_cell::sync::Lazy;
-use std::sync::Mutex;
 
 #[allow(unused_imports)]
 use anyhow::Error;
@@ -16,6 +14,7 @@ use anyhow::Error;
 // Structs and types
 type FnRoute = fn(&Request) -> String;
 
+#[derive(Hash, Eq, PartialEq, Debug)]
 enum Method {
     GET,
     POST,
@@ -25,6 +24,7 @@ enum Method {
 }
 
 #[derive(Default)]
+#[derive(Debug)]
 struct RouterNode {
     child: HashMap<&'static str, RouterNode>,
     din_child: Option<Box<RouterNode>>,
@@ -39,16 +39,23 @@ struct Router {
 impl Router {
     fn new() -> Self {
         Router {
-            routes: HashMap::default()
+            routes: HashMap::default(),
         }
     }
 
-    fn post(route: &str, handler: FnRoute) {
-        Self::add_route(Method::POST, route, handler);
+    fn post(&mut self, route: &str, handler: FnRoute) {
+        Self::add_route(self, Method::POST, route, handler);
     }
 
-    fn add_route(method: Method, route: &str, handler: FnRoute) {
-        
+    fn add_route(&mut self, method: Method, route: &str, handler: FnRoute) {
+        let mut node = &self.routes.get(&method);
+        let segments: Vec<&str> = route.trim_matches('/').split('/').collect();
+
+        for segment in segments {
+            if segment.starts_with(":") {
+
+            }
+        }
     }
 }
 
@@ -57,7 +64,8 @@ struct Request {
     method: String,
     route: String,
     headers: Vec<String>,
-    stream: TcpStream
+    stream: TcpStream,
+    params: Option<HashMap<&'static str, String>>
 }
 
 impl Request  {
@@ -103,7 +111,8 @@ impl Request  {
             method: start_line_parts[0].to_string(),
             route: start_line_parts[1].to_string(),
             headers: request_data,
-            stream: s
+            stream: s,
+            params: Some(HashMap::default())
         }
     }
 }
@@ -137,7 +146,7 @@ fn parse_method(method: &str) -> Method {
 fn handle_request(stream: TcpStream) {
     let mut request = Request::new(stream);
     println!("Request data\nmethod: {}\nroute: {}\nheaders: {:?}", request.method, request.route, request.headers);
-    exec_route_function("/echo", &mut request);
+    /* exec_route_function("/echo", &mut request); */
 }
 
 //Functions for routes destinations
@@ -158,7 +167,11 @@ fn main() {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     println!("Logs from your program will appear here!");
 
-    let listener = TcpListener::bind("127.0.0.1:4221").unwrap();
+    let mut router = Router::new();
+
+    router.post("/echo/:message", echo);
+
+    /* let listener = TcpListener::bind("127.0.0.1:4221").unwrap();
 
     for stream in listener.incoming() {
         match stream {
@@ -170,5 +183,5 @@ fn main() {
                 println!("error: {}", e);
             }
         }
-    }
+    } */
 }
