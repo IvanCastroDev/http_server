@@ -25,15 +25,15 @@ enum Method {
 
 #[derive(Default)]
 #[derive(Debug)]
-struct RouterNode {
-    child: HashMap<&'static str, RouterNode>,
-    din_child: Option<Box<RouterNode>>,
+struct RouteNode {
+    child: HashMap<&'static str, RouteNode>,
+    din_child: Option<Box<RouteNode>>,
     handler: Option<FnRoute>
 }
 
 #[derive(Default)]
 struct Router {
-    routes: HashMap<Method, HashMap<&'static str, RouterNode>>
+    routes: HashMap<Method, HashMap<&'static str, RouteNode>>
 }
 
 impl Router {
@@ -44,7 +44,7 @@ impl Router {
     }
 
     fn post(&mut self, route: &str, handler: FnRoute) {
-        Self::add_route(self, Method::POST, route, handler);
+        self.add_route(Method::POST, route, handler);
     }
 
     fn add_route(&mut self, method: Method, route: &str, handler: FnRoute) {
@@ -53,6 +53,8 @@ impl Router {
 
         for segment in segments {
             if segment.starts_with(":") {
+                let param_name = &segment[1..];
+            } else {
 
             }
         }
