@@ -26,14 +26,15 @@ enum Method {
 #[derive(Default)]
 #[derive(Debug)]
 struct RouteNode {
-    child: HashMap<&'static str, RouteNode>,
+    child: HashMap<String, RouteNode>,
     din_child: Option<Box<RouteNode>>,
-    handler: Option<FnRoute>
+    handler: Option<FnRoute>,
+    paramNames: Option<Vec<String>>
 }
 
 #[derive(Default)]
 struct Router {
-    routes: HashMap<Method, HashMap<&'static str, RouteNode>>
+    routes: HashMap<Method, RouteNode>
 }
 
 impl Router {
@@ -48,16 +49,25 @@ impl Router {
     }
 
     fn add_route(&mut self, method: Method, route: &str, handler: FnRoute) {
-        let mut node = &self.routes.get(&method);
-        let segments: Vec<&str> = route.trim_matches('/').split('/').collect();
+        // Extramos el nodo inicial utlizando el metodo (post, get, etc) como key o llave, si el nodo no existe, insertamos uno de defecto
+        let mut node = self.routes.entry(method).or_insert_with(RouteNode::default);
+        let segments: Vec<String> = route.trim_matches('/').split('/').map(|s| s.to_string()).collect();
+        let mut params_names: Vec<String> = Vec::new();
 
         for segment in segments {
             if segment.starts_with(":") {
-                let param_name = &segment[1..];
+                params_names.push(segment[1..].to_string());
+                node = node.din_child.get_or_insert_with(|| Box::new(RouteNode::default()));
             } else {
-
+                node = node.child.entry(segment).or_insert_with(RouteNode::default);
             }
+            println!("Node created or finded: {:?}", node);
         }
+
+        node.paramNames = Some(params_names);
+        node.handler = Some(handler);
+
+        println!("New node {:?}", node);
     }
 }
 
