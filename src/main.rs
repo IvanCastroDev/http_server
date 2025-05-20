@@ -23,13 +23,12 @@ enum Method {
     PATCH
 }
 
-#[derive(Default)]
-#[derive(Debug)]
+#[derive(Default, Debug)]
 struct RouteNode {
-    child: HashMap<String, RouteNode>,
+    childs: HashMap<String, RouteNode>,
     din_child: Option<Box<RouteNode>>,
     handler: Option<FnRoute>,
-    paramNames: Option<Vec<String>>
+    param_names: Option<Vec<String>>
 }
 
 #[derive(Default)]
@@ -59,16 +58,15 @@ impl Router {
                 params_names.push(segment[1..].to_string());
                 node = node.din_child.get_or_insert_with(|| Box::new(RouteNode::default()));
             } else {
-                node = node.child.entry(segment).or_insert_with(RouteNode::default);
+                node = node.childs.entry(segment).or_insert_with(RouteNode::default);
             }
-            println!("Node created or finded: {:?}", node);
         }
 
-        node.paramNames = Some(params_names);
+        node.param_names = Some(params_names);
         node.handler = Some(handler);
-
-        println!("New node {:?}", node);
     }
+
+    fn exec_handler(&mut self,)
 }
 
 #[derive(Debug)]
@@ -130,14 +128,14 @@ impl Request  {
 }
 
 // Utilities
-fn parse_method(method: &str) -> Method {
+fn parse_method(method: &str) -> Result<Method, Error> {
     match method.to_uppercase().as_str() {
         "GET" => Method::GET,
         "POST" => Method::POST,
         "PUT" => Method::PUT,
         "DELETE" => Method::DELETE,
         "PATCH" => Method::PATCH,
-        _ => panic!("Unsupported HTTP method"),
+        _ => Error::new("Unsupported HTTP method"),
     }
 } 
 
@@ -182,8 +180,12 @@ fn main() {
     let mut router = Router::new();
 
     router.post("/echo/:message", echo);
+    router.post("/test/:message", echo);
 
-    /* let listener = TcpListener::bind("127.0.0.1:4221").unwrap();
+    let mut get_routes = router.routes.entry(Method::POST).or_insert_with(RouteNode::default);
+    println!("POST routes{:?}", get_routes);
+
+    let listener = TcpListener::bind("127.0.0.1:4221").unwrap();
 
     for stream in listener.incoming() {
         match stream {
@@ -195,5 +197,5 @@ fn main() {
                 println!("error: {}", e);
             }
         }
-    } */
+    }
 }
