@@ -1,15 +1,14 @@
 // Imported libraries
 use std::{
-    io::{
+    collections::HashMap, io::{
         BufRead, BufReader, Write
-    }, 
-    net::TcpStream,
-    collections::HashMap
+    }, net::TcpStream, sync::Mutex
 };
 use std::net::TcpListener;
 
 #[allow(unused_imports)]
 use anyhow::Error;
+use once_cell::sync::Lazy;
 
 // Structs and types
 type FnRoute = fn(&Request) -> String;
@@ -28,7 +27,7 @@ struct RouteNode {
     childs: HashMap<String, RouteNode>,
     din_child: Option<Box<RouteNode>>,
     handler: Option<FnRoute>,
-    param_names: Option<Vec<String>>
+    param_name: Option<String>
 }
 
 #[derive(Default)]
@@ -51,22 +50,76 @@ impl Router {
         // Extramos el nodo inicial utlizando el metodo (post, get, etc) como key o llave, si el nodo no existe, insertamos uno de defecto
         let mut node = self.routes.entry(method).or_insert_with(RouteNode::default);
         let segments: Vec<String> = route.trim_matches('/').split('/').map(|s| s.to_string()).collect();
-        let mut params_names: Vec<String> = Vec::new();
 
         for segment in segments {
             if segment.starts_with(":") {
-                params_names.push(segment[1..].to_string());
                 node = node.din_child.get_or_insert_with(|| Box::new(RouteNode::default()));
+                node.param_name = Some(segment[1..].to_string());
             } else {
                 node = node.childs.entry(segment).or_insert_with(RouteNode::default);
             }
         }
-
-        node.param_names = Some(params_names);
         node.handler = Some(handler);
     }
 
-    fn exec_handler(&mut self,)
+    fn exec_handler(&mut self, method: Method, route: &str, request: &Request) -> String {
+        let mut res = String::new();
+        let mut node = self.routes.entry(method).or_insert_with(RouteNode::default);
+        let segments: Vec<String> = route.trim_matches('/').split('/').map(|s| s.to_string()).collect();
+        let mut params: HashMap<String, String> = HashMap::default();
+
+        for segment in segments {
+            match node.childs.get_mut(&segment) {
+                Some(child) => {
+                    node = child;
+                },
+                None => {
+                    node = node.din_child.get_or_insert_with(|| Box::new(RouteNode::default()));
+                    if let Some(ref param_name) = node.param_name {
+                        params.insert(param_name.clone(), segment);
+                    }
+                }
+            }
+        }
+
+        match node.handler {
+            Some(handler) => {
+                res.push_str(&handler(request))
+            },
+            None => {
+                res.push_str("404 Not Found\r\n\r\n")
+            }
+        }
+
+        res
+    }
+
+    fn handle_request(&mut self, stream: TcpStream) {
+        let mut request = Request::new(stream);
+
+        let method = match self.parse_method(&request.method) {
+            Ok(method) => method,
+            Err(error) => {
+                eprintln!("Error parsing method: {}", error);
+                // Optionally, you could write an error response to the stream here
+                return;
+            }
+        };
+
+        println!("Request data\nmethod: {}\nroute: {}\nheaders: {:?}", request.method, request.route, request.headers);
+        self.exec_handler(method, &request.route, &request);
+    }
+
+    fn parse_method(&mut self, method: &str) -> Result<Method, Error> {
+        match method.to_uppercase().as_str() {
+            "GET" => Ok(Method::GET),
+            "POST" => Ok(Method::POST),
+            "PUT" => Ok(Method::PUT),
+            "DELETE" => Ok(Method::DELETE),
+            "PATCH" => Ok(Method::PATCH),
+            _ => Err(anyhow::anyhow!("Unsupported HTTP method")),
+        }
+    } 
 }
 
 #[derive(Debug)]
@@ -127,36 +180,11 @@ impl Request  {
     }
 }
 
-// Utilities
-fn parse_method(method: &str) -> Result<Method, Error> {
-    match method.to_uppercase().as_str() {
-        "GET" => Method::GET,
-        "POST" => Method::POST,
-        "PUT" => Method::PUT,
-        "DELETE" => Method::DELETE,
-        "PATCH" => Method::PATCH,
-        _ => Error::new("Unsupported HTTP method"),
-    }
-} 
-
-/* fn exec_route_function(name: &str, request: &mut Request) {
-
+fn exec_route_function(name: &str, request: &mut Request) {
     let mut response = String::from("HTTP/1.1 ");
 
-    match routes.get(name) {
-        Some(f) => {
-            response.push_str(&f(request));
-        },
-        None => response.push_str("404 Not Found\r\n\r\n")
-    };
 
     request.stream.write(response.as_bytes()).unwrap();
-} */
-
-fn handle_request(stream: TcpStream) {
-    let mut request = Request::new(stream);
-    println!("Request data\nmethod: {}\nroute: {}\nheaders: {:?}", request.method, request.route, request.headers);
-    /* exec_route_function("/echo", &mut request); */
 }
 
 //Functions for routes destinations
@@ -182,16 +210,13 @@ fn main() {
     router.post("/echo/:message", echo);
     router.post("/test/:message", echo);
 
-    let mut get_routes = router.routes.entry(Method::POST).or_insert_with(RouteNode::default);
-    println!("POST routes{:?}", get_routes);
-
     let listener = TcpListener::bind("127.0.0.1:4221").unwrap();
 
     for stream in listener.incoming() {
         match stream {
             Ok(_stream) => {
                 println!("accepted new connection");
-                handle_request(_stream);
+                router.handle_request(_stream);
             }
             Err(e) => {
                 println!("error: {}", e);
