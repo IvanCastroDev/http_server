@@ -2,13 +2,12 @@
 use std::{
     collections::HashMap, io::{
         BufRead, BufReader, Write
-    }, net::TcpStream, sync::Mutex
+    }, net::TcpStream
 };
 use std::net::TcpListener;
 
 #[allow(unused_imports)]
 use anyhow::Error;
-use once_cell::sync::Lazy;
 
 // Structs and types
 type FnRoute = fn(&Request) -> String;
@@ -42,30 +41,68 @@ impl Router {
         }
     }
 
+    #[allow(dead_code)]
     fn post(&mut self, route: &str, handler: FnRoute) {
         self.add_route(Method::POST, route, handler);
     }
 
+    #[allow(dead_code)]
+    fn get(&mut self, route: &str, handler: FnRoute) {
+        self.add_route(Method::GET, route, handler);
+    }
+
+    #[allow(dead_code)]
+    fn put(&mut self, route: &str, handler: FnRoute) {
+        self.add_route(Method::PUT, route, handler);
+    }
+
+    #[allow(dead_code)]
+    fn delete(&mut self, route: &str, handler: FnRoute) {
+        self.add_route(Method::DELETE, route, handler);
+    }
+
     fn add_route(&mut self, method: Method, route: &str, handler: FnRoute) {
-        // Extramos el nodo inicial utlizando el metodo (post, get, etc) como key o llave, si el nodo no existe, insertamos uno de defecto
+        // First, we extra the initial node using the method (post, get, etc) as key, if the node does not exist, we insert one
+        // The value of the attribute "routes" is a hashmap that uses an enum of methods as a key
+        // {
+        //   GET: {
+        //     RouteNode({
+        //        ...
+        //     })
+        //   },
+        //   POST: {
+        //     RouteNode({
+        //        ...
+        //     })
+        //   }      
+        // }
         let mut node = self.routes.entry(method).or_insert_with(RouteNode::default);
+        
+        // We separate the route into segments, taking as a separator the character "/"
         let segments: Vec<String> = route.trim_matches('/').split('/').map(|s| s.to_string()).collect();
 
+        // Iteramos entre cada cadena de texto dentro de la vector "segments" y revisamos si su valor es dinamico o estatico
         for segment in segments {
             if segment.starts_with(":") {
+                // If the text chain begins with ":" It means that its value is dynamic, therefore, we create a dynamic child inside the node
                 node = node.din_child.get_or_insert_with(|| Box::new(RouteNode::default()));
+
+                // We keep the name of the parameter within the param_name attribute of the node, excluding the character ":"
                 node.param_name = Some(segment[1..].to_string());
             } else {
+                // On the contrary, by not starting the segment with ":" it means that its value is static, therefore, we can access the children of the node with the value of the segment as Key
                 node = node.childs.entry(segment).or_insert_with(RouteNode::default);
             }
         }
+
+        // Once we finish iterating between the segments, it means that we are at the end of our route tree, knowing this, we can inject the Handler Final Node function
         node.handler = Some(handler);
     }
 
-    fn exec_handler(&mut self, method: Method, route: &str, request: &Request) -> String {
+    fn exec_handler(&mut self, method: Method, request: &mut Request) -> String {
         let mut res = String::new();
         let mut node = self.routes.entry(method).or_insert_with(RouteNode::default);
-        let segments: Vec<String> = route.trim_matches('/').split('/').map(|s| s.to_string()).collect();
+        let segments: Vec<String> = request.route.trim_matches('/').split('/').map(|s| s.to_string()).collect();
         let mut params: HashMap<String, String> = HashMap::default();
 
         for segment in segments {
@@ -82,6 +119,8 @@ impl Router {
             }
         }
 
+        request.params = Some(params);
+
         match node.handler {
             Some(handler) => {
                 res.push_str(&handler(request))
@@ -91,23 +130,31 @@ impl Router {
             }
         }
 
+        println!("Returning string {}", res);
+
         res
     }
 
     fn handle_request(&mut self, stream: TcpStream) {
         let mut request = Request::new(stream);
+        let mut response = String::from("HTTP/1.1 ");
+
 
         let method = match self.parse_method(&request.method) {
             Ok(method) => method,
             Err(error) => {
                 eprintln!("Error parsing method: {}", error);
                 // Optionally, you could write an error response to the stream here
+                response.push_str("405 Method Not Allowed\r\nAllow: GET, POST\r\n\r\n");
+                request.stream.write(response.as_bytes()).unwrap();
                 return;
             }
         };
 
         println!("Request data\nmethod: {}\nroute: {}\nheaders: {:?}", request.method, request.route, request.headers);
-        self.exec_handler(method, &request.route, &request);
+        response.push_str(&self.exec_handler(method, &mut request));
+
+        request.stream.write(response.as_bytes()).unwrap();
     }
 
     fn parse_method(&mut self, method: &str) -> Result<Method, Error> {
@@ -128,7 +175,7 @@ struct Request {
     route: String,
     headers: Vec<String>,
     stream: TcpStream,
-    params: Option<HashMap<&'static str, String>>
+    params: Option<HashMap<String, String>>
 }
 
 impl Request  {
@@ -180,13 +227,6 @@ impl Request  {
     }
 }
 
-fn exec_route_function(name: &str, request: &mut Request) {
-    let mut response = String::from("HTTP/1.1 ");
-
-
-    request.stream.write(response.as_bytes()).unwrap();
-}
-
 //Functions for routes destinations
 fn echo(request: &Request) -> String {
     let reg = regex::Regex::new(r"^/echo/(?P<message>[^/]+)$").unwrap();
@@ -207,8 +247,8 @@ fn main() {
 
     let mut router = Router::new();
 
-    router.post("/echo/:message", echo);
-    router.post("/test/:message", echo);
+    router.get("/echo/:message", echo);
+    router.get("/test/:message", echo);
 
     let listener = TcpListener::bind("127.0.0.1:4221").unwrap();
 
