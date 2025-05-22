@@ -62,8 +62,8 @@ impl Router {
     }
 
     fn add_route(&mut self, method: Method, route: &str, handler: FnRoute) {
-        // First, we extra the initial node using the method (post, get, etc) as key, if the node does not exist, we insert one
-        // The value of the attribute "routes" is a hashmap that uses an enum of methods as a key
+        // First, we extra the initial node using the method (post, get, etc) as key, if the node does not exist, insert one
+        // The value of the attribute "routes" is a hashmap that uses an enum of methods as a keys
         // {
         //   GET: {
         //     RouteNode({
@@ -90,7 +90,8 @@ impl Router {
                 // We keep the name of the parameter within the param_name attribute of the node, excluding the character ":"
                 node.param_name = Some(segment[1..].to_string());
             } else {
-                // On the contrary, by not starting the segment with ":" it means that its value is static, therefore, we can access the children of the node with the value of the segment as Key
+                // On the contrary, by not starting the segment with ":" it means that its value is static, therefore, 
+                // we can access the children of the node with the value of the segment as Key or create a new one if doesn't exist
                 node = node.childs.entry(segment).or_insert_with(RouteNode::default);
             }
         }
@@ -119,7 +120,7 @@ impl Router {
             }
         }
 
-        request.params = Some(params);
+        request.params = params;
 
         match node.handler {
             Some(handler) => {
@@ -175,7 +176,7 @@ struct Request {
     route: String,
     headers: Vec<String>,
     stream: TcpStream,
-    params: Option<HashMap<String, String>>
+    params: HashMap<String, String>
 }
 
 impl Request  {
@@ -222,18 +223,14 @@ impl Request  {
             route: start_line_parts[1].to_string(),
             headers: request_data,
             stream: s,
-            params: Some(HashMap::default())
+            params: HashMap::default()
         }
     }
 }
 
 //Functions for routes destinations
 fn echo(request: &Request) -> String {
-    let reg = regex::Regex::new(r"^/echo/(?P<message>[^/]+)$").unwrap();
-    
-    if let Some(caps) = reg.captures(&request.route) {
-        let message = &caps["message"];
-
+    if let Some(message) = request.params.get("message") {
         String::from(format!("200 Ok\r\nContent-Type:text/plain\r\nContent-Length: {}\r\n\r\n{}", message.len(), message))
     } else {
         let message: String = String::from("Invalid Message");
