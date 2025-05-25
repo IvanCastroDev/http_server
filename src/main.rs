@@ -212,6 +212,8 @@ impl Request  {
             .map(|s| s.to_string())
             .collect();
 
+        println!("Elements in request: {:?} ", request_data);
+
         // We extract the data from the petition line to be able to throw the method and the destination route
         let start_line = &request_data[0];
         let start_line_parts: Vec<&str> = start_line.split(" ").collect();
@@ -238,6 +240,12 @@ fn echo(request: &Request) -> String {
     }
 }
 
+fn test_post(request: &Request) -> String {
+    println!("Request in post request: {:?}",request);
+
+    String::from(format!("200 Ok\r\nContent-Type:text/plain\r\n\r\nDone"))
+}
+
 fn main() {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     println!("Logs from your program will appear here!");
@@ -246,6 +254,7 @@ fn main() {
 
     router.get("/echo/:message", echo);
     router.get("/test/:message", echo);
+    router.post("/post_test", test_post);
 
     let listener = TcpListener::bind("127.0.0.1:4221").unwrap();
 
