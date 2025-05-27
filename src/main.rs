@@ -1,7 +1,7 @@
 // Imported libraries
 use std::{
-    collections::HashMap, io::{
-        BufRead, BufReader, Write
+    collections::{HashMap, VecDeque}, io::{
+        BufRead, BufReader, Read, Write
     }, net::TcpStream
 };
 use std::net::TcpListener;
@@ -145,7 +145,6 @@ impl Router {
             Ok(method) => method,
             Err(error) => {
                 eprintln!("Error parsing method: {}", error);
-                // Optionally, you could write an error response to the stream here
                 response.push_str("405 Method Not Allowed\r\nAllow: GET, POST\r\n\r\n");
                 request.stream.write(response.as_bytes()).unwrap();
                 return;
@@ -165,7 +164,7 @@ impl Router {
             "PUT" => Ok(Method::PUT),
             "DELETE" => Ok(Method::DELETE),
             "PATCH" => Ok(Method::PATCH),
-            _ => Err(anyhow::anyhow!("Unsupported HTTP method")),
+            _ => Err(anyhow::anyhow!("Unsupported HTTP method {}", method.to_uppercase())),
         }
     } 
 }
@@ -174,7 +173,7 @@ impl Router {
 struct Request {
     method: String,
     route: String,
-    headers: Vec<String>,
+    headers: HashMap<String, String>,
     stream: TcpStream,
     params: HashMap<String, String>
 }
@@ -207,23 +206,56 @@ impl Request  {
         }
 
         // We separate the data to divide them in [request line, headers]
-        let request_data: Vec<String> = request_data
+        let mut request_data: VecDeque<String> = request_data
             .split("\r\n")
             .map(|s| s.to_string())
             .collect();
 
-        println!("Elements in request: {:?} ", request_data);
-
         // We extract the data from the petition line to be able to throw the method and the destination route
-        let start_line = &request_data[0];
+        let start_line = request_data.pop_front().unwrap_or_else(|| "start line".to_string());
         let start_line_parts: Vec<&str> = start_line.split(" ").collect();
 
+        let headers_map: HashMap<String, String> = request_data.
+            into_iter().
+            filter_map(|l| {
+                let mut line_split = l.splitn(2, ":");
+                let key = line_split.next()?.trim().to_string();
+                let value = line_split.next()?.trim().to_string();
+                Some((key, value))
+            })
+            .collect();
 
+        println!(
+            "Content-Length: {}",
+            headers_map.get("Content-Length")
+                .unwrap_or(&String::from("0"))
+        );
+
+        let content_bytes =  headers_map
+            .get("Content-Length")
+            .unwrap_or(&String::from("0"))
+            .parse::<usize>()
+            .unwrap_or(0);
+
+        let boundary = headers_map
+            .get("Content-Type")
+            .unwrap_or(&String::from("boundary=------"))
+            .split("boundary=")
+            .nth(1)
+            .unwrap_or("--------");
+
+        println!("boundary: {}", boundary);
+        let mut body_buf = vec![0u8; content_bytes];
+
+        reader.read_exact(&mut body_buf);
+
+        /* println!("Bytes in body: {:?}", body_buf); */
+        
         // We return a struct with the formatted request data
         Request {
             method: start_line_parts[0].to_string(),
             route: start_line_parts[1].to_string(),
-            headers: request_data,
+            headers: headers_map,
             stream: s,
             params: HashMap::default()
         }
@@ -252,6 +284,7 @@ fn main() {
 
     let mut router = Router::new();
 
+    router.get("/", |r| String::from("200 Ok\r\nContent-Type:text/plain\r\n\r\nDone"));
     router.get("/echo/:message", echo);
     router.get("/test/:message", echo);
     router.post("/post_test", test_post);
