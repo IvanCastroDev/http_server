@@ -266,6 +266,22 @@ impl Request  {
             params: HashMap::default()
         }
     }
+
+    fn extract_body_content(&mut self, body: &Vec<u8>, boundary: &Vec<u8>) {
+        let mut parts: Vec<u8> = Vec::new();
+        let mut pos = 0;
+
+        while let Some(start) = self.find_boundary(body, boundary, &pos) {
+
+        }
+    }
+    
+    fn find_boundary(&mut self, body: &Vec<u8>, boundary: &Vec<u8>, pos: &usize) -> Option<usize> {
+        body
+            .windows(boundary.len())
+            .position(|w| w == boundary)
+            .map(|i| i + pos)
+    }
 }
 
 //Functions for routes destinations
