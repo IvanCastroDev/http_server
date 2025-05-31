@@ -237,14 +237,20 @@ impl Request  {
             .parse::<usize>()
             .unwrap_or(0);
 
+        let default_boudnary = String::from("boundary=------");
+
         let boundary = headers_map
             .get("Content-Type")
-            .unwrap_or(&String::from("boundary=------"))
+            .unwrap_or(&default_boudnary)
             .split("boundary=")
             .nth(1)
             .unwrap_or("--------");
 
         println!("boundary: {}", boundary);
+
+        let final_boundary = format!("--{}--", boundary).as_bytes();
+        let boundary = format!("--{}", boundary).as_bytes();
+
         let mut body_buf = vec![0u8; content_bytes];
 
         reader.read_exact(&mut body_buf);
