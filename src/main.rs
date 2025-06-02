@@ -81,14 +81,14 @@ impl Router {
         // We separate the route into segments, taking as a separator the character "/"
         let segments: Vec<String> = route.trim_matches('/').split('/').map(|s| s.to_string()).collect();
 
-        // Iteramos entre cada cadena de texto dentro de la vector "segments" y revisamos si su valor es dinamico o estatico
+        // Iterate between each string within the segments vector and check if its value is dynamic or static.
         for segment in segments {
             if segment.starts_with(":") {
-                // If the text chain begins with ":" It means that its value is dynamic, therefore, we create a dynamic child inside the node
+                // If the string begins with ":" It means that its value is dynamic, therefore, we create a dynamic child inside the node
                 node = node.din_child.get_or_insert_with(|| Box::new(RouteNode::default()));
 
-                // We keep the name of the parameter within the param_name attribute of the node, excluding the character ":"
-                node.param_name = Some(segment[1..].to_string());
+                // We keep the name of the parameter within the param_name attribute of the node
+                node.param_name = Some(segment[1..].to_string()); // 1 .. to ignore the first character (":")
             } else {
                 // On the contrary, by not starting the segment with ":" it means that its value is static, therefore, 
                 // we can access the children of the node with the value of the segment as Key or create a new one if doesn't exist
@@ -96,7 +96,7 @@ impl Router {
             }
         }
 
-        // Once we finish iterating between the segments, it means that we are at the end of our route tree, knowing this, we can inject the Handler Final Node function
+        // Once we finish iterating between the segments, it means that we are at the end of our route tree, knowing this, we can inject the Handler function in the node
         node.handler = Some(handler);
     }
 
@@ -145,7 +145,7 @@ impl Router {
             Ok(method) => method,
             Err(error) => {
                 eprintln!("Error parsing method: {}", error);
-                response.push_str("405 Method Not Allowed\r\nAllow: GET, POST\r\n\r\n");
+                response.push_str("405 Method Not Allowed\r\nAllow: GET, POST, PUT, DELETE, PATCH\r\n\r\n");
                 request.stream.write(response.as_bytes()).unwrap();
                 return;
             }
@@ -179,7 +179,7 @@ struct Request {
 }
 
 impl Request  {
-    fn new (mut s: TcpStream) -> Self {
+    fn new (&mut self, mut s: TcpStream) -> Self {
         // We use bufReader to read the stream bytes in fragments (8kib).
         let mut reader = BufReader::new(&mut s);
         let mut request_data = String::new();
@@ -218,18 +218,13 @@ impl Request  {
         let headers_map: HashMap<String, String> = request_data.
             into_iter().
             filter_map(|l| {
-                let mut line_split = l.splitn(2, ":");
-                let key = line_split.next()?.trim().to_string();
-                let value = line_split.next()?.trim().to_string();
+                let mut line_split = l.splitn(2, ":"); // separate the string using the value of ":" as a separator, we limit the separation of the string so that only 2 parts return
+                let key = line_split.next()?.trim().to_string(); // The first part of separate string will be taken as the hashmap key
+                let value = line_split.next()?.trim().to_string(); // The second part is taken as the value of the previously established key
+
                 Some((key, value))
             })
             .collect();
-
-        println!(
-            "Content-Length: {}",
-            headers_map.get("Content-Length")
-                .unwrap_or(&String::from("0"))
-        );
 
         let content_bytes =  headers_map
             .get("Content-Length")
@@ -246,16 +241,16 @@ impl Request  {
             .nth(1)
             .unwrap_or("--------");
 
-        println!("boundary: {}", boundary);
-
-        let final_boundary = format!("--{}--", boundary).as_bytes();
-        let boundary = format!("--{}", boundary).as_bytes();
+        let boundary_string = format!("--{}", boundary);
+        let boundary_bytes = boundary_string.as_bytes();
 
         let mut body_buf = vec![0u8; content_bytes];
 
         reader.read_exact(&mut body_buf);
 
-        /* println!("Bytes in body: {:?}", body_buf); */
+
+        // TODO: Refacturizar el metodo new para no utlizar self
+        let parts = self.split_multipart(&body_buf, boundary_bytes);
         
         // We return a struct with the formatted request data
         Request {
@@ -267,20 +262,39 @@ impl Request  {
         }
     }
 
-    fn extract_body_content(&mut self, body: &Vec<u8>, boundary: &Vec<u8>) {
+    fn split_multipart(&mut self, body: &Vec<u8>, boundary: &[u8]) -> Vec<u8> {
         let mut parts: Vec<u8> = Vec::new();
         let mut pos = 0;
 
-        while let Some(start) = self.find_boundary(body, boundary, &pos) {
+        // We look within the body vector the bytes that are identical to the Boundary bytes
+        // When we find an identical bytes chain, we ignore them
+        // We only extract those bytes that are between each Boundary
+        while let Some(start) = self.find_boundary(body, boundary, pos) {
+            // Start + Boundary -Because the Start value is equal to the initial index where the Boudnary was found in the body vectro, therefore, the bytes that are Boundary himself are ignored
+            if let Some(end) = self.find_boundary(body, boundary, start + boundary.len()) {
+                let part = body[start + boundary.len() + 2]; // + 2 to ignore the bytes of \r\n
+                parts.push(part);
+                pos = end;
+            } else {
+                break;
+            }
+        };
 
-        }
+        parts
     }
     
-    fn find_boundary(&mut self, body: &Vec<u8>, boundary: &Vec<u8>, pos: &usize) -> Option<usize> {
-        body
-            .windows(boundary.len())
-            .position(|w| w == boundary)
-            .map(|i| i + pos)
+    fn find_boundary(&mut self, body: &Vec<u8>, boundary: &[u8], start: usize) -> Option<usize> {
+        // split the Body bytes in blocks of the same size as the Boundary and iterate between each block
+        // Starting from the index indicating the start variable (the value of this variable will be equal to 0 or to the last index in which a Boundary was found so as not to repeat bytes already compared )
+        // If the block contains the same bites as the Boundary, the index of the block is extracted and returned
+        body[start..]
+            .windows(boundary.len()) // break the sub-slice in blocks of "n" size (in this case, blocks of the same size as the Boundary)
+            .position(|window| {
+                println!("Window: {:?} \nboundary: {:?}", window, boundary);
+                window == boundary
+            })
+            .map(|index| index + start) // index + start - Because the value of the index is relative to the sub-slice created by [start ..], we need to know the absolute value of the index in the body
+
     }
 }
 
