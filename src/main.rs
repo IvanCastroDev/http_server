@@ -62,7 +62,7 @@ impl Router {
     }
 
     fn add_route(&mut self, method: Method, route: &str, handler: FnRoute) {
-        // First, we extra the initial node using the method (post, get, etc) as key, if the node does not exist, insert one
+        // First, extra the initial node using the method (post, get, etc) as key, if the node does not exist, insert one
         // The value of the attribute "routes" is a hashmap that uses an enum of methods as a keys
         // {
         //   GET: {
@@ -78,7 +78,7 @@ impl Router {
         // }
         let mut node = self.routes.entry(method).or_insert_with(RouteNode::default);
         
-        // We separate the route into segments, taking as a separator the character "/"
+        // separate the route into segments, taking as a separator the character "/"
         let segments: Vec<String> = route.trim_matches('/').split('/').map(|s| s.to_string()).collect();
 
         // Iterate between each string within the segments vector and check if its value is dynamic or static.
@@ -87,16 +87,16 @@ impl Router {
                 // If the string begins with ":" It means that its value is dynamic, therefore, we create a dynamic child inside the node
                 node = node.din_child.get_or_insert_with(|| Box::new(RouteNode::default()));
 
-                // We keep the name of the parameter within the param_name attribute of the node
+                // keep the name of the parameter within the param_name attribute of the node
                 node.param_name = Some(segment[1..].to_string()); // 1 .. to ignore the first character (":")
             } else {
                 // On the contrary, by not starting the segment with ":" it means that its value is static, therefore, 
-                // we can access the children of the node with the value of the segment as Key or create a new one if doesn't exist
+                // can access the children of the node with the value of the segment as Key or create a new one if doesn't exist
                 node = node.childs.entry(segment).or_insert_with(RouteNode::default);
             }
         }
 
-        // Once we finish iterating between the segments, it means that we are at the end of our route tree, knowing this, we can inject the Handler function in the node
+        // Once finish iterating between the segments, it means that we are at the end of our route tree, knowing this, we can inject the Handler function in the node
         node.handler = Some(handler);
     }
 
@@ -179,19 +179,22 @@ struct Request {
 }
 
 impl Request  {
-    fn new (&mut self, mut s: TcpStream) -> Self {
-        // We use bufReader to read the stream bytes in fragments (8kib).
+    fn new (mut s: TcpStream) -> Self {
+        // use bufReader to read the stream bytes in fragments (8kib).
         let mut reader = BufReader::new(&mut s);
         let mut request_data = String::new();
+        let mut total_bytes = 0;
 
         loop {
             // String as a bufer to translate the bytes read in a string
             let mut str_buf = String::new();
 
-            // We read and count the amount of bytes in the stream before a crlf that marks the end of a line
+            // read and count the amount of bytes in the stream before a crlf that marks the end of a line
             let bytes_read = reader.read_line(&mut str_buf).unwrap();
 
-            // If the reads are equal to zero it is because the connection with the client is closed
+            total_bytes += bytes_read;
+
+            // If the bytes reads are equal to zero it is because the connection with the client is closed
             if bytes_read == 0 {
                 break;
             };
@@ -201,25 +204,27 @@ impl Request  {
                 break;
             };
             
-            // We add the new line to the string that stores all the data from the request
+            // add the new line to the string that stores all the data from the request
             request_data.push_str(&str_buf);
         }
 
-        // We separate the data to divide them in [request line, headers]
-        let mut request_data: VecDeque<String> = request_data
+        println!("Total bytes in headers {}", total_bytes);
+
+        // separate the data to divide them in [request line, headers]
+        let mut request_data: VecDeque<String> = request_data // VecDeque to extract elements at the beginning or end of the vector more simply
             .split("\r\n")
             .map(|s| s.to_string())
             .collect();
 
-        // We extract the data from the petition line to be able to throw the method and the destination route
+        // extract the data from the request line to be able to throw the method and the destination route
         let start_line = request_data.pop_front().unwrap_or_else(|| "start line".to_string());
-        let start_line_parts: Vec<&str> = start_line.split(" ").collect();
+        let start_line_parts: Vec<&str> = start_line.split(" ").collect(); // [Method, dest_route]
 
         let headers_map: HashMap<String, String> = request_data.
             into_iter().
             filter_map(|l| {
                 let mut line_split = l.splitn(2, ":"); // separate the string using the value of ":" as a separator, we limit the separation of the string so that only 2 parts return
-                let key = line_split.next()?.trim().to_string(); // The first part of separate string will be taken as the hashmap key
+                let key = line_split.next()?.trim().to_string(); // The first part is taken as the hashmap key
                 let value = line_split.next()?.trim().to_string(); // The second part is taken as the value of the previously established key
 
                 Some((key, value))
@@ -246,33 +251,57 @@ impl Request  {
 
         let mut body_buf = vec![0u8; content_bytes];
 
-        reader.read_exact(&mut body_buf);
-
-
-        // TODO: Refacturizar el metodo new para no utlizar self
-        let parts = self.split_multipart(&body_buf, boundary_bytes);
+        reader.read_exact(&mut body_buf).unwrap();
         
-        // We return a struct with the formatted request data
-        Request {
+        let mut req = Self {
             method: start_line_parts[0].to_string(),
             route: start_line_parts[1].to_string(),
             headers: headers_map,
-            stream: s,
-            params: HashMap::default()
+            params: HashMap::default(),
+            stream: s
+        };
+
+        let parts = req.split_multipart(&body_buf, boundary_bytes);
+
+        for part in parts {
+            println!("Part: {:?}\n", part.len());
+
+        }
+
+        req
+    }
+
+    fn parse_part(part: &[u8]) {
+        let crlf = b"\r\n\r\n";
+
+        while let Some(start) = part.windows(4).position(|w| w == crlf) {
+
         }
     }
 
-    fn split_multipart(&mut self, body: &Vec<u8>, boundary: &[u8]) -> Vec<u8> {
-        let mut parts: Vec<u8> = Vec::new();
+    fn split_multipart<'a>(&mut self, body: &'a [u8], boundary: &[u8]) -> Vec<&'a [u8]> {
+        let mut parts: Vec<&'a [u8]> = Vec::new();
         let mut pos = 0;
 
-        // We look within the body vector the bytes that are identical to the Boundary bytes
-        // When we find an identical bytes chain, we ignore them
-        // We only extract those bytes that are between each Boundary
+        // search in the body vector the bytes that are identical to the Boundary bytes
+        // When find an identical bytes chain, ignore them
+        // only extracted those bytes that are between each Boundary
+        // Example:
+        //
+        // ---- first boundary finded {This part is ignored}
+        //
+        // Content {This part is taken and pushed in parts vector}
+        //
+        // ---- Next boundary
+        //
+        // Content
+        //
+        // ---- Next or final boundary
+
         while let Some(start) = self.find_boundary(body, boundary, pos) {
-            // Start + Boundary -Because the Start value is equal to the initial index where the Boudnary was found in the body vectro, therefore, the bytes that are Boundary himself are ignored
+            // Start + Boundary -Because the Start value is equal to the initial index where the Boudnary was found in the body vec, therefore, the bytes that are Boundary himself are ignored
             if let Some(end) = self.find_boundary(body, boundary, start + boundary.len()) {
-                let part = body[start + boundary.len() + 2]; // + 2 to ignore the bytes of \r\n
+                let part = &body[start + boundary.len() + 2 ..end]; // + 2 to ignore the bytes of \r\n and end the sub-slice in the next boundary finded
                 parts.push(part);
                 pos = end;
             } else {
@@ -283,22 +312,19 @@ impl Request  {
         parts
     }
     
-    fn find_boundary(&mut self, body: &Vec<u8>, boundary: &[u8], start: usize) -> Option<usize> {
+    fn find_boundary(&mut self, body: &[u8], boundary: &[u8], start: usize) -> Option<usize> {
         // split the Body bytes in blocks of the same size as the Boundary and iterate between each block
         // Starting from the index indicating the start variable (the value of this variable will be equal to 0 or to the last index in which a Boundary was found so as not to repeat bytes already compared )
         // If the block contains the same bites as the Boundary, the index of the block is extracted and returned
         body[start..]
             .windows(boundary.len()) // break the sub-slice in blocks of "n" size (in this case, blocks of the same size as the Boundary)
-            .position(|window| {
-                println!("Window: {:?} \nboundary: {:?}", window, boundary);
-                window == boundary
-            })
+            .position(|window| window == boundary)
             .map(|index| index + start) // index + start - Because the value of the index is relative to the sub-slice created by [start ..], we need to know the absolute value of the index in the body
 
     }
 }
 
-//Functions for routes destinations
+//Functions for routes
 fn echo(request: &Request) -> String {
     if let Some(message) = request.params.get("message") {
         String::from(format!("200 Ok\r\nContent-Type:text/plain\r\nContent-Length: {}\r\n\r\n{}", message.len(), message))
@@ -315,12 +341,9 @@ fn test_post(request: &Request) -> String {
 }
 
 fn main() {
-    // You can use print statements as follows for debugging, they'll be visible when running tests.
-    println!("Logs from your program will appear here!");
-
     let mut router = Router::new();
 
-    router.get("/", |r| String::from("200 Ok\r\nContent-Type:text/plain\r\n\r\nDone"));
+    router.get("/", |_r| String::from("200 Ok\r\nContent-Type:text/plain\r\n\r\nDone"));
     router.get("/echo/:message", echo);
     router.get("/test/:message", echo);
     router.post("/post_test", test_post);
