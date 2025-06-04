@@ -274,8 +274,15 @@ impl Request  {
     fn parse_part(part: &[u8]) {
         let crlf = b"\r\n\r\n";
 
-        while let Some(start) = part.windows(4).position(|w| w == crlf) {
+        while let Some(index) = part.windows(4).position(|w| w == crlf) {
+            let headers_bytes = &part[..index];
+            let body_bytes = &part[index + 4..];
 
+            let mut headers = Vec::new();
+
+            for line in body_bytes.split(|&b| b == b'\n') {
+                
+            }
         }
     }
 
