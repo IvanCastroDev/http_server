@@ -278,10 +278,14 @@ impl Request  {
             let headers_bytes = &part[..index];
             let body_bytes = &part[index + 4..];
 
-            let mut headers = Vec::new();
+            // TODO: Definir los tipos de datos que el hashmap va a contener
+            let mut headers = HashMap::new();
 
-            for line in body_bytes.split(|&b| b == b'\n') {
-                
+            for line in headers_bytes.split(|&b| b == b'\n') {
+                if let Some(split_index) = line.windows(1).position(|b| b == b": ") {
+                    let key = &line[..split_index];
+                    let value = &line[split_index..];
+                }
             }
         }
     }
