@@ -2,7 +2,7 @@
 use std::{
     collections::{HashMap, VecDeque}, io::{
         BufRead, BufReader, Read, Write
-    }, net::TcpStream
+    }, net::TcpStream, str
 };
 use std::net::TcpListener;
 
@@ -279,12 +279,14 @@ impl Request  {
             let body_bytes = &part[index + 4..];
 
             // TODO: Definir los tipos de datos que el hashmap va a contener
-            let mut headers = HashMap::new();
+            let mut headers: HashMap<&str, &str> = HashMap::new();
 
             for line in headers_bytes.split(|&b| b == b'\n') {
                 if let Some(split_index) = line.windows(1).position(|b| b == b": ") {
-                    let key = &line[..split_index];
-                    let value = &line[split_index..];
+                    let key = std::str::from_utf8(&line[..split_index]).unwrap_or("").trim();
+                    let value = std::str::from_utf8(&line[split_index..]).unwrap_or("").trim();
+
+                    headers.insert(key, value);
                 }
             }
         }
