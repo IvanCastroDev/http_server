@@ -264,32 +264,48 @@ impl Request  {
         let parts = req.split_multipart(&body_buf, boundary_bytes);
 
         for part in parts {
-            println!("Part: {:?}\n", part.len());
+            println!("Part len: {:?}\n", part.len());
+            let parsed_part = req.parse_part(part);
 
+            println!("Parsed part headers: {:?}", parsed_part.0);
         }
 
         req
     }
 
-    fn parse_part(part: &[u8]) {
+    fn parse_part<'a>(&mut self, part: &'a[u8]) -> (HashMap<&'a str, &'a str>, &'a[u8]) {
         let crlf = b"\r\n\r\n";
 
-        while let Some(index) = part.windows(4).position(|w| w == crlf) {
-            let headers_bytes = &part[..index];
-            let body_bytes = &part[index + 4..];
+        // find the end of the headers and start of the body of the request part based on a CRLF
+            // Eg:
+            //
+            // |----------------------------------------------------------------|
+            // |                         Headers                                |
+            // |----------------------------------------------------------------|
+            // ---- \r\n\r\n (CRLF)
+            // |----------------------------------------------------------------|
+            // |                         Body                                   |
+            // |----------------------------------------------------------------|
 
-            // TODO: Definir los tipos de datos que el hashmap va a contener
+        if let Some(index) = part.windows(4).position(|w| w == crlf) {
+            let headers_bytes = &part[..index];
+            let data = &part[index + 4..];
+
             let mut headers: HashMap<&str, &str> = HashMap::new();
 
-            for line in headers_bytes.split(|&b| b == b'\n') {
-                if let Some(split_index) = line.windows(1).position(|b| b == b": ") {
+            for line in headers_bytes.split(|&b| b == b'\n') { // \n is equivalent to having finished a header, so bytes are divided based on this element
+                if let Some(split_index) = line.windows(2).position(|b| b == b": ") { // separate "key: value", Eg. Content-Type: application/json
                     let key = std::str::from_utf8(&line[..split_index]).unwrap_or("").trim();
                     let value = std::str::from_utf8(&line[split_index..]).unwrap_or("").trim();
 
                     headers.insert(key, value);
                 }
             }
+
+            return (headers, data)
         }
+
+        (HashMap::new(), &[])
     }
 
     fn split_multipart<'a>(&mut self, body: &'a [u8], boundary: &[u8]) -> Vec<&'a [u8]> {
@@ -299,20 +315,20 @@ impl Request  {
         // search in the body vector the bytes that are identical to the Boundary bytes
         // When find an identical bytes chain, ignore them
         // only extracted those bytes that are between each Boundary
-        // Example:
-        //
-        // ---- first boundary finded {This part is ignored}
-        //
-        // Content {This part is taken and pushed in parts vector}
-        //
-        // ---- Next boundary
-        //
-        // Content
-        //
-        // ---- Next or final boundary
+            // Eg:
+            //
+            // ---- first boundary finded {This part is ignored} - start variable
+            // |----------------------------------------------------------------|
+            // |                         Content                                | - This part is taken and pushed in parts vector
+            // |----------------------------------------------------------------|
+            // ---- Next boundary - end variable
+            // |----------------------------------------------------------------|
+            // |                         Content                                | - Taked and pushed again
+            // |----------------------------------------------------------------|
+            // ---- Next or final boundary
 
         while let Some(start) = self.find_boundary(body, boundary, pos) {
-            // Start + Boundary -Because the Start value is equal to the initial index where the Boudnary was found in the body vec, therefore, the bytes that are Boundary himself are ignored
+            // Start + Boundary - Because the Start value is equal to the initial index where the Boudnary was found in the body vec, therefore, the bytes that are Boundary himself are ignored
             if let Some(end) = self.find_boundary(body, boundary, start + boundary.len()) {
                 let part = &body[start + boundary.len() + 2 ..end]; // + 2 to ignore the bytes of \r\n and end the sub-slice in the next boundary finded
                 parts.push(part);
@@ -327,11 +343,11 @@ impl Request  {
     
     fn find_boundary(&mut self, body: &[u8], boundary: &[u8], start: usize) -> Option<usize> {
         // split the Body bytes in blocks of the same size as the Boundary and iterate between each block
-        // Starting from the index indicating the start variable (the value of this variable will be equal to 0 or to the last index in which a Boundary was found so as not to repeat bytes already compared )
-        // If the block contains the same bites as the Boundary, the index of the block is extracted and returned
+        // Starting from the index indicating the start param (the value of this param will be equal to 0 or to the last index in which a Boundary was found so as not to repeat bytes already compared)
+        // If the block contains the same bites as the Boundary, the index of the first elemento in the block is extracted and returned
         body[start..]
             .windows(boundary.len()) // break the sub-slice in blocks of "n" size (in this case, blocks of the same size as the Boundary)
-            .position(|window| window == boundary)
+            .position(|window| window == boundary) // searching the window that contains the same bytes as the Boundary
             .map(|index| index + start) // index + start - Because the value of the index is relative to the sub-slice created by [start ..], we need to know the absolute value of the index in the body
 
     }
