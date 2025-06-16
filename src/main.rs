@@ -102,8 +102,15 @@ impl Router {
 
     fn exec_handler(&mut self, method: Method, request: &mut Request) -> String {
         let mut res = String::new();
-        let mut node = self.routes.entry(method).or_insert_with(RouteNode::default);
-        let segments: Vec<String> = request.route.trim_matches('/').split('/').map(|s| s.to_string()).collect();
+        let mut node = self.routes
+                                            .entry(method)
+                                            .or_insert_with(RouteNode::default);
+
+        let segments: Vec<String> = request.route
+                                    .trim_matches('/').split('/')
+                                    .map(|s| s.to_string())
+                                    .collect();
+                                
         let mut params: HashMap<String, String> = HashMap::default();
 
         for segment in segments {
@@ -131,8 +138,6 @@ impl Router {
             }
         }
 
-        println!("Returning string {}", res);
-
         res
     }
 
@@ -151,7 +156,6 @@ impl Router {
             }
         };
 
-        println!("Request data\nmethod: {}\nroute: {}\nheaders: {:?}", request.method, request.route, request.headers);
         response.push_str(&self.exec_handler(method, &mut request));
 
         request.stream.write(response.as_bytes()).unwrap();
@@ -175,7 +179,9 @@ struct Request {
     route: String,
     headers: HashMap<String, String>,
     stream: TcpStream,
-    params: HashMap<String, String>
+    params: HashMap<String, String>,
+    body: HashMap<String, String>,
+    files: Vec<(HashMap<String, String>, Vec<u8>)>
 }
 
 impl Request  {
@@ -183,7 +189,6 @@ impl Request  {
         // use bufReader to read the stream bytes in fragments (8kib).
         let mut reader = BufReader::new(&mut s);
         let mut request_data = String::new();
-        let mut total_bytes = 0;
 
         loop {
             // String as a bufer to translate the bytes read in a string
@@ -191,8 +196,6 @@ impl Request  {
 
             // read and count the amount of bytes in the stream before a crlf that marks the end of a line
             let bytes_read = reader.read_line(&mut str_buf).unwrap();
-
-            total_bytes += bytes_read;
 
             // If the bytes reads are equal to zero it is because the connection with the client is closed
             if bytes_read == 0 {
@@ -207,8 +210,6 @@ impl Request  {
             // add the new line to the string that stores all the data from the request
             request_data.push_str(&str_buf);
         }
-
-        println!("Total bytes in headers {}", total_bytes);
 
         // separate the data to divide them in [request line, headers]
         let mut request_data: VecDeque<String> = request_data // VecDeque to extract elements at the beginning or end of the vector more simply
@@ -258,22 +259,41 @@ impl Request  {
             route: start_line_parts[1].to_string(),
             headers: headers_map,
             params: HashMap::default(),
-            stream: s
+            stream: s,
+            body: HashMap::default(),
+            files: Vec::default()
         };
 
         let parts = req.split_multipart(&body_buf, boundary_bytes);
 
         for part in parts {
-            println!("Part len: {:?}\n", part.len());
             let parsed_part = req.parse_part(part);
 
-            println!("Parsed part headers: {:?}", parsed_part.0);
+            req.parse_body(parsed_part);
         }
 
         req
     }
 
-    fn parse_part<'a>(&mut self, part: &'a[u8]) -> (HashMap<&'a str, &'a str>, &'a[u8]) {
+    fn parse_body(&mut self, part: (HashMap<String, String>, &[u8])) {
+        if let Some(_filename) = part.0.get("filename") {
+            self.files.push((part.0, part.1.to_vec()));
+        } else {
+            let key = part.0.
+                                get("name")
+                                .unwrap_or(&String::from("key"))
+                                .to_string();
+
+            let value = std::str::from_utf8(part.1)
+                                    .unwrap()
+                                    .trim()
+                                    .to_string();
+
+            self.body.insert(key, value);
+        }
+    }
+
+    fn parse_part<'a>(&mut self, part: &'a[u8]) -> (HashMap<String, String>, &'a[u8]) {
         let crlf = b"\r\n\r\n";
 
         // find the end of the headers and start of the body of the request part based on a CRLF
@@ -291,14 +311,37 @@ impl Request  {
             let headers_bytes = &part[..index];
             let data = &part[index + 4..];
 
-            let mut headers: HashMap<&str, &str> = HashMap::new();
+            let mut headers: HashMap<String, String> = HashMap::new();
 
-            for line in headers_bytes.split(|&b| b == b'\n') { // \n is equivalent to having finished a header, so bytes are divided based on this element
+            for line in headers_bytes.split(|&b| b == b'\n') { // \n is equivalent to having finished a header line, so bytes are divided based on this element
                 if let Some(split_index) = line.windows(2).position(|b| b == b": ") { // separate "key: value", Eg. Content-Type: application/json
-                    let key = std::str::from_utf8(&line[..split_index]).unwrap_or("").trim();
-                    let value = std::str::from_utf8(&line[split_index..]).unwrap_or("").trim();
+                    let key = std::str::from_utf8(&line[..split_index])
+                                        .unwrap_or("")
+                                        .trim()
+                                        .to_string();
+                                    
+                    let values = std::str::from_utf8(&line[split_index + 2..])
+                                            .unwrap_or("")
+                                            .trim()
+                                            .to_string();
 
-                    headers.insert(key, value);
+                    let values_iter = values.split("; ").skip(1); // skip the first element, which is equal to "form-data;", we look for only values ​​that are equal to "value=value;" Eg. Name="Test"
+
+                    for value in values_iter {
+                        if let Some((k, v)) = value.split_once("=") {
+                            headers.insert(
+                                k.replace("\"", ""), 
+                                v.replace("\"", "")
+                            );
+                        }
+                    }
+
+                    headers.insert(
+                        key, 
+                        values
+                            .split_terminator("; ")
+                            .nth(0).unwrap_or("")
+                            .to_string());
                 }
             }
 
@@ -363,9 +406,18 @@ fn echo(request: &Request) -> String {
     }
 }
 
-fn test_post(request: &Request) -> String {
-    println!("Request in post request: {:?}",request);
+fn test_post_files(request: &Request) -> String {
+    for file in request.files.iter() {
+        let file_path = format!("./uploads/{}", file.0
+                                .get("filename")
+                                .unwrap_or(&"test.txt".to_string()));
 
+        std::fs::write(
+            file_path, 
+            &file.1
+        ).unwrap();
+    }
+    
     String::from(format!("200 Ok\r\nContent-Type:text/plain\r\n\r\nDone"))
 }
 
@@ -375,7 +427,7 @@ fn main() {
     router.get("/", |_r| String::from("200 Ok\r\nContent-Type:text/plain\r\n\r\nDone"));
     router.get("/echo/:message", echo);
     router.get("/test/:message", echo);
-    router.post("/post_test", test_post);
+    router.post("/post_test", test_post_files);
 
     let listener = TcpListener::bind("127.0.0.1:4221").unwrap();
 
