@@ -1,8 +1,19 @@
-// Imported libraries
+// libraries
 use std::{
-    collections::{HashMap, VecDeque}, io::{
-        BufRead, BufReader, Read, Write
-    }, net::TcpStream, str
+    collections::{
+        HashMap, 
+        VecDeque
+    }, 
+    io::{
+        BufRead, 
+        BufReader, 
+        Read, 
+        Write
+    }, 
+    net::TcpStream,
+    str,
+    thread,
+    time::Duration
 };
 use std::net::TcpListener;
 
@@ -107,7 +118,8 @@ impl Router {
                                             .or_insert_with(RouteNode::default);
 
         let segments: Vec<String> = request.route
-                                    .trim_matches('/').split('/')
+                                    .trim_matches('/')
+                                    .split('/')
                                     .map(|s| s.to_string())
                                     .collect();
                                 
@@ -174,6 +186,7 @@ impl Router {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 struct Request {
     method: String,
     route: String,
@@ -277,13 +290,14 @@ impl Request  {
 
     fn parse_body(&mut self, part: (HashMap<String, String>, &[u8])) {
         if let Some(_filename) = part.0.get("filename") {
+            // leave the bites of the file intact to be processed manually by the user
             self.files.push((part.0, part.1.to_vec()));
         } else {
             let key = part.0.
                                 get("name")
                                 .unwrap_or(&String::from("key"))
                                 .to_string();
-
+            // convert the bites into text, which will be used as the hashmap value
             let value = std::str::from_utf8(part.1)
                                     .unwrap()
                                     .trim()
@@ -421,10 +435,23 @@ fn test_post_files(request: &Request) -> String {
     String::from(format!("200 Ok\r\nContent-Type:text/plain\r\n\r\nDone"))
 }
 
+fn slow_request(request: &Request) -> String {
+    let duration = request.params
+            .get("duration")
+            .unwrap_or(&"5".to_string())
+            .parse::<u64>()
+            .unwrap_or(5);
+        
+    thread::sleep(Duration::from_secs(duration));
+
+    String::from(format!("200 Ok\r\nContent-Type:text/plain\r\n\r\nDone"))
+}
+
 fn main() {
     let mut router = Router::new();
 
     router.get("/", |_r| String::from("200 Ok\r\nContent-Type:text/plain\r\n\r\nDone"));
+    router.get("/sleep/:duration", slow_request);
     router.get("/echo/:message", echo);
     router.get("/test/:message", echo);
     router.post("/post_test", test_post_files);
