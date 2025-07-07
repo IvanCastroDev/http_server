@@ -1,16 +1,16 @@
 // libraries
 use std::{
     collections::{
-        HashMap, 
+        HashMap,
         VecDeque
-    }, 
-    io::{
-        BufRead, 
-        BufReader, 
+    }, io::{
+        BufRead,
+        BufReader,
         Read, 
         Write
     }, 
-    net::TcpStream,
+    net::TcpStream, 
+    path::Path, 
     str,
     thread,
     time::Duration
@@ -23,7 +23,7 @@ use anyhow::Error;
 // Structs and types
 type FnRoute = fn(&Request) -> String;
 
-#[derive(Hash, Eq, PartialEq, Debug)]
+#[derive(Hash, Eq, PartialEq, Debug, Clone)]
 enum Method {
     GET,
     POST,
@@ -32,7 +32,7 @@ enum Method {
     PATCH
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 struct RouteNode {
     childs: HashMap<String, RouteNode>,
     din_child: Option<Box<RouteNode>>,
@@ -40,7 +40,7 @@ struct RouteNode {
     param_name: Option<String>
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct Router {
     routes: HashMap<Method, RouteNode>
 }
@@ -73,7 +73,7 @@ impl Router {
     }
 
     fn add_route(&mut self, method: Method, route: &str, handler: FnRoute) {
-        // First, extra the initial node using the method (post, get, etc) as key, if the node does not exist, insert one
+        // First, extract the initial node using the method (post, get, etc) as key, if the node does not exist, insert one
         // The value of the attribute "routes" is a hashmap that uses an enum of methods as a keys
         // {
         //   GET: {
@@ -95,7 +95,7 @@ impl Router {
         // Iterate between each string within the segments vector and check if its value is dynamic or static.
         for segment in segments {
             if segment.starts_with(":") {
-                // If the string begins with ":" It means that its value is dynamic, therefore, we create a dynamic child inside the node
+                // If the string begins with ":" It means that its value is dynamic, therefore, create a dynamic child inside the node
                 node = node.din_child.get_or_insert_with(|| Box::new(RouteNode::default()));
 
                 // keep the name of the parameter within the param_name attribute of the node
@@ -323,7 +323,7 @@ impl Request  {
 
         if let Some(index) = part.windows(4).position(|w| w == crlf) {
             let headers_bytes = &part[..index];
-            let data = &part[index + 4..];
+            let data = &part[index + 4..]; // Skip CRLF 4 bites
 
             let mut headers: HashMap<String, String> = HashMap::new();
 
@@ -421,10 +421,12 @@ fn echo(request: &Request) -> String {
 }
 
 fn test_post_files(request: &Request) -> String {
+    if !Path::new("./uploads").is_dir() {
+        std::fs::create_dir("./uploads").unwrap();
+    }
+
     for file in request.files.iter() {
-        let file_path = format!("./uploads/{}", file.0
-                                .get("filename")
-                                .unwrap_or(&"test.txt".to_string()));
+        let file_path = format!("./uploads/{}", file.0.get("filename").unwrap_or(&"test.txt".to_string()));
 
         std::fs::write(
             file_path, 
@@ -441,7 +443,10 @@ fn slow_request(request: &Request) -> String {
             .unwrap_or(&"5".to_string())
             .parse::<u64>()
             .unwrap_or(5);
-        
+
+    println!("Sleeping request for {} seconds", duration);
+    
+    // simulating a slow request
     thread::sleep(Duration::from_secs(duration));
 
     String::from(format!("200 Ok\r\nContent-Type:text/plain\r\n\r\nDone"))
@@ -462,7 +467,10 @@ fn main() {
         match stream {
             Ok(_stream) => {
                 println!("accepted new connection");
-                router.handle_request(_stream);
+                let mut router = router.clone();
+                thread::spawn(move || {
+                    router.handle_request(_stream);
+                });
             }
             Err(e) => {
                 println!("error: {}", e);
